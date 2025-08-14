@@ -1,112 +1,109 @@
-## 1. Scanning and Storage Architecture
+# Duplicate Media Management Application
 
-### Scan Process Design
-- Select a directory for processing
-- Perform a single, comprehensive scan of the entire directory
-- Generate a persistent duplicate detection report
-- Decouple scanning from user interaction
-- Store potential duplicates in a structured, queryable format
+## 1. Filename-Based Duplicate Detection Strategy
 
-### Data Storage Model
-```json
-{
-  "scan_metadata": {
-    "timestamp": "2024-08-14T10:30:00Z",
-    "total_files_scanned": 40000,
-    "potential_duplicate_groups": 1500
-  },
-  "duplicate_groups": [
-    {
-      "group_id": "unique_group_identifier",
-      "files": [
-        {
-          "path": "/full/path/to/file1.jpg",
-          "filename": "file1.jpg",
-          "size": 1024000,
-          "modified_date": "2023-01-15T14:30:00Z",
-          "proposed_action": null
-        },
-        {
-          "path": "/full/path/to/file2.jpg",
-          "filename": "file2.jpg",
-          "size": 512000,
-          "modified_date": "2023-01-15T14:30:00Z",
-          "proposed_action": null
-        }
-      ],
-      "detection_method": "filename_pattern"
-    }
-  ],
-  "user_decisions": {
-    "group_id": {
-      "keep": "/path/to/kept/file",
-      "delete": ["/path/to/deleted/file1", "/path/to/deleted/file2"]
-    }
-  }
-}
-```
+### Core Detection Logic
+The application will identify potential duplicates based on specific filename patterns:
 
-## 2. Efficient Scanning Strategy
+#### Pattern Recognition Rules
+1. Base Name Matching
+   - Strip out numerical suffixes and extensions
+   - Compare core filename components
 
-### Key Performance Optimizations
-- Single-pass directory traversal
-- Minimal memory footprint
-- Persistent storage of scan results
-- Asynchronous processing
-- Resumable scanning for large directories
+#### Specific Matching Scenarios
 
-## 3. User Interaction Workflow
+##### Scenario 1: GUID-based Filenames
+- Pattern: `[GUID].[extension]` and `[GUID]-[numbers].[extension]`
+- Example: 
+  - `58c9b580-5303-4b3b-b75d-f07f505f8d59.JPG`
+  - `58c9b580-5303-4b3b-b75d-f07f505f8d59-222115.JPG`
 
-### Scanning and Review Process
-1. **Initial Scan**
-   - Comprehensive directory scan
-   - Generate potential duplicate groups
-   - Store results in persistent storage
+##### Scenario 2: IMG Prefix Filenames
+- Pattern: `IMG_[number].[extension]` and `IMG_[number]-[additional numbers].[extension]`
+- Examples:
+  - `IMG_1234.HEIC`
+  - `IMG_1234-56788.HEIC`
 
-2. **User Review Stage**
-   - Load pre-scanned duplicate groups
-   - Allow user to review each group
-   - Mark actions for each file (keep/delete)
-   - No immediate file modifications
-
-3. **Execution Stage**
-   - After complete review
-   - Execute all user-confirmed actions
-   - Batch file operations
-   - Logging of all actions
+##### Scenario 3: Complex Scenario Handling
+- Ability to distinguish between:
+  - Actual duplicates
+  - Different images with similar naming
 
 
-## 4. Additional Efficiency Features
+## 2. User Interface Requirements
+### Main menu Interface
+- Selecting a directory
+- Scan the directory
+- Review recent scan
+
+
+### Duplicate Review Interface
+- List view of potential duplicate groups
+- Side-by-side file details:
+  - Filename
+  - File size
+  - Creation date
+  - Last modified date
+- Preview pane for images/videos
+- Checkboxes for selection/deletion
+
+### User Actions
+- Review each potential duplicate group
+- Select which files to keep/delete
+- View file details
+- Quick preview of media files
+- Batch decision support
+
+## 3. Technical Specifications
+
+### Technology Stack
+- Language: Python
+- Cross-platform desktop application
+- Minimal external dependencies
 
 ### Performance Considerations
-- Minimal I/O during scanning
-- Lazy loading of file previews
-- Async user interface
-- Cancelable long-running tasks
+- Efficient file scanning for 40,000+ files
+- Low memory footprint
+- Background processing
+- Quick preview generation
 
-### Storage Optimizations
-- Compact storage format
-- Incremental updates
-- Option to prune old scan results
+## 4. Filename Detection Challenges
 
-## 5. Error Handling and Safety
+### Handling Edge Cases
+- Distinguish between:
+  - Actual duplicates
+  - Different files with similar names
+- Flexible pattern matching
+- User confirmation for ambiguous cases
 
-### Safeguards
-- No automatic deletions
-- Confirmation required for all actions
-- Comprehensive logging
+### Pattern Recognition Limitations
+- Relies on consistent naming conventions
+- Manual review recommended
+- Fallback to manual selection for complex scenarios
 
-### Logging
-- Detailed scan logs
-- User decision tracking
-- Error and exception logging
+## 5. Proposed Implementation Approach
 
-## 6. Implementation Recommendations
+1. Filename Parsing Module
+   - Develop robust filename parsing
+   - Handle various naming patterns
+   - Extract core identification components
 
-### Technology Options
-- Choose lightweight efficient tech stack
+2. Duplicate Grouping Engine
+   - Group files by parsed base name
+   - Identify potential duplicates
+   - Prepare for user review
 
-## 7. Running the application
-- I want this app to run easily
-- Include instructions to run 
-- Assume that users will download the application from git hub so set up relevant gitignore file
+3. User Interface
+   - Display grouped potential duplicates
+   - Provide detailed file information
+   - Enable user decision-making
+
+## Development Considerations
+- Prioritize accuracy over automated deletion
+- Always require user confirmation
+- Provide comprehensive file details
+- Maintain original file integrity
+
+## 6. Application considerations
+- Easy to download from git and run
+- Instructions for application available
