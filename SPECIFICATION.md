@@ -107,6 +107,6 @@
 - Choose lightweight efficient tech stack
 
 ## 7. Running the application
-- The app has to be run using Docker
-- Ability to clone or download the repo from github and start application smoothly and quickly
-- Instructions on how to set up and install
+- I want this app to run easily
+- Include instructions to run 
+- Assume that users will download the application from git hub so set up relevant gitignore file
