@@ -1,6 +1,7 @@
 ## 1. Scanning and Storage Architecture
 
 ### Scan Process Design
+- Select a directory for processing
 - Perform a single, comprehensive scan of the entire directory
 - Generate a persistent duplicate detection report
 - Decouple scanning from user interaction
@@ -104,3 +105,8 @@
 
 ### Technology Options
 - Choose lightweight efficient tech stack
+
+## 7. Running the application
+- The app has to be run using Docker
+- Ability to clone or download the repo from github and start application smoothly and quickly
+- Instructions on how to set up and install
