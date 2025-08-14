@@ -1,6 +1,5 @@
 """Tests for filename parser module."""
 
-
 from ..parser import FilenameParser
 
 

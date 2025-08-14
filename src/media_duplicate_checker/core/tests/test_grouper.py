@@ -406,3 +406,102 @@ class TestDuplicateGrouper:
 
         duplicate_groups = self.grouper.create_duplicate_groups([file])
         assert len(duplicate_groups) == 0  # No duplicates with single file
+
+    def test_icloud_live_photos_exclusion(self) -> None:
+        """Test that iCloud Live Photos pairs are excluded from duplicate detection."""
+        # Create HEIC and MOV files with same base name (iCloud Live Photos)
+        base_name = "img_1234"
+
+        parsed_heic = ParsedFilename(
+            original_name="IMG_1234.HEIC",
+            base_name=base_name,
+            suffix=None,
+            extension=".HEIC",
+            pattern_type="IMG",
+        )
+        parsed_mov = ParsedFilename(
+            original_name="IMG_1234.MOV",
+            base_name=base_name,
+            suffix=None,
+            extension=".MOV",
+            pattern_type="IMG",
+        )
+
+        heic_file = FileMetadata(
+            file_path=Path("/test/IMG_1234.HEIC"),
+            filename="IMG_1234.HEIC",
+            size_bytes=5000000,  # 5MB
+            created_at=datetime.now(),
+            modified_at=datetime.now(),
+            parsed_filename=parsed_heic,
+        )
+
+        mov_file = FileMetadata(
+            file_path=Path("/test/IMG_1234.MOV"),
+            filename="IMG_1234.MOV",
+            size_bytes=15000000,  # 15MB
+            created_at=datetime.now(),
+            modified_at=datetime.now(),
+            parsed_filename=parsed_mov,
+        )
+
+        files = [heic_file, mov_file]
+        groups = self.grouper.create_duplicate_groups(files)
+
+        # Should create no duplicate groups (iCloud Live Photos pair excluded)
+        assert len(groups) == 0
+
+    def test_is_icloud_live_photos_pair_true(self) -> None:
+        """Test _is_icloud_live_photos_pair returns True for HEIC/MOV pair."""
+        heic_file = self.create_test_file("IMG_1234.HEIC")
+        mov_file = self.create_test_file("IMG_1234.MOV")
+
+        files = [heic_file, mov_file]
+        assert self.grouper._is_icloud_live_photos_pair(files) is True
+
+    def test_is_icloud_live_photos_pair_false_different_extensions(self) -> None:
+        """Test _is_icloud_live_photos_pair returns False for different extension pairs."""
+        heic_file = self.create_test_file("IMG_1234.HEIC")
+        jpg_file = self.create_test_file("IMG_1234.JPG")
+
+        files = [heic_file, jpg_file]
+        assert self.grouper._is_icloud_live_photos_pair(files) is False
+
+    def test_is_icloud_live_photos_pair_false_three_files(self) -> None:
+        """Test _is_icloud_live_photos_pair returns False for more than 2 files."""
+        heic_file = self.create_test_file("IMG_1234.HEIC")
+        mov_file = self.create_test_file("IMG_1234.MOV")
+        jpg_file = self.create_test_file("IMG_1234.JPG")
+
+        files = [heic_file, mov_file, jpg_file]
+        assert self.grouper._is_icloud_live_photos_pair(files) is False
+
+    def test_multiple_heic_files_not_excluded(self) -> None:
+        """Test that multiple HEIC files (actual duplicates) are still detected."""
+        base_name = "img_1234"
+
+        parsed1 = ParsedFilename(
+            original_name="IMG_1234.HEIC",
+            base_name=base_name,
+            suffix=None,
+            extension=".HEIC",
+            pattern_type="IMG",
+        )
+        parsed2 = ParsedFilename(
+            original_name="IMG_1234-copy.HEIC",
+            base_name=base_name,
+            suffix="copy",
+            extension=".HEIC",
+            pattern_type="IMG",
+        )
+
+        files = [
+            self.create_test_file("IMG_1234.HEIC", parsed_filename=parsed1),
+            self.create_test_file("IMG_1234-copy.HEIC", parsed_filename=parsed2),
+        ]
+
+        groups = self.grouper.create_duplicate_groups(files)
+
+        # Should create duplicate group (both HEIC, not a Live Photos pair)
+        assert len(groups) == 1
+        assert groups[0].file_count == 2

@@ -5,6 +5,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+from PIL import Image, ImageTk
+
 from ..core import DuplicateGroup, FileMetadata, ScanResult
 
 logger = logging.getLogger(__name__)
@@ -244,45 +246,56 @@ class DuplicateReviewWindow:
             self._create_file_card(file, i)
 
     def _create_file_card(self, file: FileMetadata, index: int) -> None:
-        """Create a file comparison card."""
+        """Create a file comparison card with preview."""
         # Card frame
         card_frame = ttk.LabelFrame(self.scrollable_frame, text=f"File {index + 1}", padding="10")
-        card_frame.grid(row=index // 2, column=index % 2, sticky="ew", padx=5, pady=5)
+        card_frame.grid(row=index // 2, column=index % 2, sticky="nsew", padx=5, pady=5)
+
+        # Configure card frame columns
+        card_frame.grid_columnconfigure(1, weight=1)
+
+        # Create preview thumbnail
+        preview_label = self._create_preview_thumbnail(card_frame, file)
+        if preview_label:
+            preview_label.grid(row=0, column=0, rowspan=6, sticky="n", padx=(0, 10))
+            info_column = 1
+        else:
+            info_column = 0
 
         # File info
         ttk.Label(card_frame, text="Filename:", font=("Arial", 9, "bold")).grid(
-            row=0, column=0, sticky="w"
+            row=0, column=info_column, sticky="w"
         )
         ttk.Label(card_frame, text=file.filename, wraplength=250).grid(
-            row=0, column=1, sticky="w", padx=(5, 0)
+            row=0, column=info_column + 1, sticky="w", padx=(5, 0)
         )
 
         ttk.Label(card_frame, text="Size:", font=("Arial", 9, "bold")).grid(
-            row=1, column=0, sticky="w"
+            row=1, column=info_column, sticky="w"
         )
         ttk.Label(card_frame, text=f"{file.size_mb:.1f} MB").grid(
-            row=1, column=1, sticky="w", padx=(5, 0)
+            row=1, column=info_column + 1, sticky="w", padx=(5, 0)
         )
 
         ttk.Label(card_frame, text="Created:", font=("Arial", 9, "bold")).grid(
-            row=2, column=0, sticky="w"
+            row=2, column=info_column, sticky="w"
         )
         ttk.Label(card_frame, text=file.created_at.strftime("%Y-%m-%d %H:%M")).grid(
-            row=2, column=1, sticky="w", padx=(5, 0)
+            row=2, column=info_column + 1, sticky="w", padx=(5, 0)
         )
 
         ttk.Label(card_frame, text="Modified:", font=("Arial", 9, "bold")).grid(
-            row=3, column=0, sticky="w"
+            row=3, column=info_column, sticky="w"
         )
         ttk.Label(card_frame, text=file.modified_at.strftime("%Y-%m-%d %H:%M")).grid(
-            row=3, column=1, sticky="w", padx=(5, 0)
+            row=3, column=info_column + 1, sticky="w", padx=(5, 0)
         )
 
         ttk.Label(card_frame, text="Path:", font=("Arial", 9, "bold")).grid(
-            row=4, column=0, sticky="w"
+            row=4, column=info_column, sticky="w"
         )
         path_label = ttk.Label(card_frame, text=str(file.file_path.parent), wraplength=250)
-        path_label.grid(row=4, column=1, sticky="w", padx=(5, 0))
+        path_label.grid(row=4, column=info_column + 1, sticky="w", padx=(5, 0))
 
         # Action checkbox
         delete_var = tk.BooleanVar(value=file.file_path in self.files_to_delete)
@@ -292,7 +305,7 @@ class DuplicateReviewWindow:
             variable=delete_var,
             command=lambda f=file, v=delete_var: self._toggle_file_deletion(f, v),
         )
-        delete_checkbox.grid(row=5, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        delete_checkbox.grid(row=5, column=info_column, columnspan=2, sticky="w", pady=(10, 0))
 
     def _load_file_details(self, group: DuplicateGroup) -> None:
         """Load files into the details tree view."""
@@ -430,6 +443,118 @@ class DuplicateReviewWindow:
                 self._delete_selected_files()
 
         self.window.destroy()
+
+    def _create_preview_thumbnail(self, parent: ttk.Frame, file: FileMetadata) -> tk.Label | None:
+        """
+        Create a thumbnail preview for an image or video file.
+
+        Args:
+            parent: Parent widget to place the thumbnail
+            file: File metadata to create preview for
+
+        Returns:
+            Label widget with thumbnail image, or None if preview not possible
+        """
+        try:
+            # Check file size limit (max 50MB for preview generation)
+            if file.size_mb > 50.0:
+                return None
+
+            # Check if file exists
+            if not file.file_path.exists():
+                return None
+
+            extension = file.extension.lower()
+
+            # Handle image files
+            if extension in {
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".gif",
+                ".bmp",
+                ".tiff",
+                ".webp",
+                ".heic",
+                ".heif",
+            }:
+                return self._create_image_thumbnail(parent, file)
+
+            # Handle video files
+            if extension in {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".webm"}:
+                return self._create_video_thumbnail(parent, file)
+
+        except Exception as e:
+            logger.warning(f"Could not create thumbnail for {file.filename}: {e}")
+
+        return None
+
+    def _create_image_thumbnail(self, parent: ttk.Frame, file: FileMetadata) -> tk.Label | None:
+        """Create thumbnail for image file."""
+        try:
+            with Image.open(file.file_path) as img:
+                # Convert RGBA to RGB if necessary
+                if img.mode in ("RGBA", "LA"):
+                    background = Image.new("RGB", img.size, (255, 255, 255))
+                    if img.mode == "RGBA":
+                        background.paste(img, mask=img.split()[-1])
+                    else:
+                        background.paste(img, mask=img.split()[-1])
+                    img = background
+                elif img.mode != "RGB":
+                    img = img.convert("RGB")
+
+                # Calculate thumbnail size maintaining aspect ratio
+                img.thumbnail((120, 120), Image.Resampling.LANCZOS)
+
+                # Convert to PhotoImage
+                photo = ImageTk.PhotoImage(img)
+
+                # Create label
+                label = tk.Label(parent, image=photo, relief="solid", borderwidth=1)
+                label.image = photo  # Keep a reference to prevent garbage collection
+                return label
+
+        except Exception as e:
+            logger.warning(f"Could not create image thumbnail for {file.filename}: {e}")
+            return None
+
+    def _create_video_thumbnail(self, parent: ttk.Frame, file: FileMetadata) -> tk.Label | None:
+        """Create thumbnail placeholder for video file."""
+        try:
+            # Create a simple video icon placeholder
+            # In a production app, you'd use a video processing library to extract first frame
+            placeholder = Image.new("RGB", (120, 90), (64, 64, 64))
+
+            # Add video play icon (simple triangle)
+            try:
+                from PIL import ImageDraw
+
+                draw = ImageDraw.Draw(placeholder)
+
+                # Draw play triangle
+                triangle_points = [(45, 30), (45, 60), (75, 45)]
+                draw.polygon(triangle_points, fill=(255, 255, 255))
+
+                # Add text
+                try:
+                    draw.text((35, 70), "VIDEO", fill=(255, 255, 255))
+                except OSError:
+                    # Font loading failed, skip text
+                    pass
+
+            except ImportError:
+                # ImageDraw not available, use simple gray rectangle
+                pass
+
+            photo = ImageTk.PhotoImage(placeholder)
+            label = tk.Label(parent, image=photo, relief="solid", borderwidth=1)
+            label.image = photo  # Keep a reference
+            return label
+
+        except Exception as e:
+            logger.warning(f"Could not create video thumbnail for {file.filename}: {e}")
+            return None
 
     def _delete_selected_files(self) -> None:
         """Delete the selected files (placeholder implementation)."""

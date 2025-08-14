@@ -61,6 +61,7 @@ class DuplicateGrouper:
 
         Only creates groups for base names that have multiple files.
         Single files are not considered duplicates.
+        iCloud Live Photos (.HEIC/.MOV pairs) are excluded from duplicate detection.
         """
         base_name_groups = self.group_by_base_name(files)
         duplicate_groups = []
@@ -68,6 +69,11 @@ class DuplicateGrouper:
         for composite_key, file_list in base_name_groups.items():
             # Only create duplicate groups for multiple files
             if len(file_list) < 2:
+                continue
+
+            # Skip iCloud Live Photos pairs (.HEIC/.MOV with same base name)
+            if self._is_icloud_live_photos_pair(file_list):
+                logger.debug(f"Skipping iCloud Live Photos pair: {composite_key}")
                 continue
 
             # Extract pattern type and base name from composite key
@@ -229,3 +235,24 @@ class DuplicateGrouper:
 
         logger.info(f"Found {len(exact_duplicates)} exact duplicate groups")
         return exact_duplicates
+
+    def _is_icloud_live_photos_pair(self, files: list[FileMetadata]) -> bool:
+        """
+        Check if a group of files represents an iCloud Live Photos pair.
+
+        Args:
+            files: List of files to check
+
+        Returns:
+            True if files represent an iCloud Live Photos pair (.HEIC + .MOV with same base name)
+
+        iCloud Live Photos consist of:
+        - One .HEIC file (photo)
+        - One .MOV file (video)
+        - Both have the same base filename
+        """
+        if len(files) != 2:
+            return False
+
+        extensions = {file.extension for file in files}
+        return extensions == {".heic", ".mov"}  # Extensions are already normalized to lowercase

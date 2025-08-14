@@ -32,9 +32,7 @@ class FileMetadata(BaseModel):
     size_bytes: int = Field(..., ge=0, description="File size in bytes")
     created_at: datetime = Field(..., description="File creation timestamp")
     modified_at: datetime = Field(..., description="File modification timestamp")
-    parsed_filename: ParsedFilename | None = Field(
-        None, description="Parsed filename components"
-    )
+    parsed_filename: ParsedFilename | None = Field(None, description="Parsed filename components")
 
     @field_validator("file_path")
     @classmethod
