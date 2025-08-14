@@ -7,6 +7,15 @@ from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
 
+try:
+    import pillow_heif
+
+    # Register HEIF opener with Pillow
+    pillow_heif.register_heif_opener()
+    HEIF_SUPPORTED = True
+except ImportError:
+    HEIF_SUPPORTED = False
+
 from ..core import DuplicateGroup, FileMetadata, ScanResult
 
 logger = logging.getLogger(__name__)
@@ -241,71 +250,71 @@ class DuplicateReviewWindow:
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
 
+        # Configure grid weights for better card layout
+        self.scrollable_frame.grid_columnconfigure(0, weight=1)
+        self.scrollable_frame.grid_columnconfigure(1, weight=1)
+
         # Create file cards
         for i, file in enumerate(group.files):
             self._create_file_card(file, i)
 
     def _create_file_card(self, file: FileMetadata, index: int) -> None:
-        """Create a file comparison card with preview."""
-        # Card frame
-        card_frame = ttk.LabelFrame(self.scrollable_frame, text=f"File {index + 1}", padding="10")
-        card_frame.grid(row=index // 2, column=index % 2, sticky="nsew", padx=5, pady=5)
+        """Create an enhanced file comparison card with preview."""
+        # Card frame with better styling
+        is_marked = file.file_path in self.files_to_delete
+        card_title = f"File {index + 1} {'🗑️' if is_marked else ''}"
 
-        # Configure card frame columns
-        card_frame.grid_columnconfigure(1, weight=1)
+        card_frame = ttk.LabelFrame(self.scrollable_frame, text=card_title, padding="12")
+        card_frame.grid(row=index // 2, column=index % 2, sticky="nsew", padx=8, pady=8)
 
-        # Create preview thumbnail
-        preview_label = self._create_preview_thumbnail(card_frame, file)
-        if preview_label:
-            preview_label.grid(row=0, column=0, rowspan=6, sticky="n", padx=(0, 10))
+        # Configure card frame columns for better layout
+        card_frame.grid_columnconfigure(2, weight=1)
+
+        # Create enhanced preview thumbnail
+        preview_widget = self._create_enhanced_preview(card_frame, file)
+        if preview_widget:
+            preview_widget.grid(row=0, column=0, rowspan=8, sticky="n", padx=(0, 15))
             info_column = 1
         else:
             info_column = 0
 
-        # File info
-        ttk.Label(card_frame, text="Filename:", font=("Arial", 9, "bold")).grid(
-            row=0, column=info_column, sticky="w"
-        )
-        ttk.Label(card_frame, text=file.filename, wraplength=250).grid(
-            row=0, column=info_column + 1, sticky="w", padx=(5, 0)
-        )
+        # Enhanced file info with better formatting
+        info_data = [
+            ("Filename:", file.filename, 280),
+            ("Size:", f"{file.size_mb:.1f} MB ({file.size_bytes:,} bytes)", None),
+            ("Format:", file.extension.upper().lstrip(".") or "Unknown", None),
+            ("Created:", file.created_at.strftime("%Y-%m-%d %H:%M:%S"), None),
+            ("Modified:", file.modified_at.strftime("%Y-%m-%d %H:%M:%S"), None),
+            ("Directory:", str(file.file_path.parent), 280),
+        ]
 
-        ttk.Label(card_frame, text="Size:", font=("Arial", 9, "bold")).grid(
-            row=1, column=info_column, sticky="w"
-        )
-        ttk.Label(card_frame, text=f"{file.size_mb:.1f} MB").grid(
-            row=1, column=info_column + 1, sticky="w", padx=(5, 0)
-        )
+        for row, (label_text, value_text, wrap_length) in enumerate(info_data):
+            ttk.Label(card_frame, text=label_text, font=("Arial", 9, "bold")).grid(
+                row=row, column=info_column, sticky="nw", pady=2
+            )
+            value_label = ttk.Label(
+                card_frame, text=value_text, wraplength=wrap_length, font=("Arial", 9)
+            )
+            value_label.grid(row=row, column=info_column + 1, sticky="nw", padx=(10, 0), pady=2)
 
-        ttk.Label(card_frame, text="Created:", font=("Arial", 9, "bold")).grid(
-            row=2, column=info_column, sticky="w"
-        )
-        ttk.Label(card_frame, text=file.created_at.strftime("%Y-%m-%d %H:%M")).grid(
-            row=2, column=info_column + 1, sticky="w", padx=(5, 0)
-        )
-
-        ttk.Label(card_frame, text="Modified:", font=("Arial", 9, "bold")).grid(
-            row=3, column=info_column, sticky="w"
-        )
-        ttk.Label(card_frame, text=file.modified_at.strftime("%Y-%m-%d %H:%M")).grid(
-            row=3, column=info_column + 1, sticky="w", padx=(5, 0)
-        )
-
-        ttk.Label(card_frame, text="Path:", font=("Arial", 9, "bold")).grid(
-            row=4, column=info_column, sticky="w"
-        )
-        path_label = ttk.Label(card_frame, text=str(file.file_path.parent), wraplength=250)
-        path_label.grid(row=4, column=info_column + 1, sticky="w", padx=(5, 0))
-
-        # Action checkbox
+        # Enhanced action checkbox with visual feedback
         delete_var = tk.BooleanVar(value=file.file_path in self.files_to_delete)
+        checkbox_text = "🗑️ Mark for deletion" if not is_marked else "✅ Marked for deletion"
         delete_checkbox = ttk.Checkbutton(
             card_frame,
-            text="Mark for deletion",
+            text=checkbox_text,
             variable=delete_var,
             command=lambda f=file, v=delete_var: self._toggle_file_deletion(f, v),
         )
-        delete_checkbox.grid(row=5, column=info_column, columnspan=2, sticky="w", pady=(10, 0))
+        delete_checkbox.grid(row=6, column=info_column, columnspan=2, sticky="w", pady=(15, 0))
+
+        # Add "Open File Location" button
+        open_button = ttk.Button(
+            card_frame,
+            text="📁 Open Location",
+            command=lambda: self._open_file_location(file),
+        )
+        open_button.grid(row=7, column=info_column, columnspan=2, sticky="w", pady=(5, 0))
 
     def _load_file_details(self, group: DuplicateGroup) -> None:
         """Load files into the details tree view."""
@@ -444,6 +453,31 @@ class DuplicateReviewWindow:
 
         self.window.destroy()
 
+    def _create_enhanced_preview(self, parent: ttk.Frame, file: FileMetadata) -> ttk.Frame | None:
+        """Create an enhanced preview widget with image and metadata."""
+        preview_frame = ttk.Frame(parent)
+
+        # Create thumbnail
+        thumbnail_label = self._create_preview_thumbnail(preview_frame, file)
+        if thumbnail_label:
+            thumbnail_label.grid(row=0, column=0, sticky="n")
+
+            # Add image dimensions if available
+            dimensions_text = self._get_image_dimensions(file)
+            if dimensions_text:
+                ttk.Label(
+                    preview_frame, text=dimensions_text, font=("Arial", 8), foreground="gray"
+                ).grid(row=1, column=0, pady=(2, 0))
+
+            return preview_frame
+        # Create a placeholder with file type info
+        placeholder = self._create_file_type_placeholder(preview_frame, file)
+        if placeholder:
+            placeholder.grid(row=0, column=0, sticky="n")
+            return preview_frame
+
+        return None
+
     def _create_preview_thumbnail(self, parent: ttk.Frame, file: FileMetadata) -> tk.Label | None:
         """
         Create a thumbnail preview for an image or video file.
@@ -466,19 +500,33 @@ class DuplicateReviewWindow:
 
             extension = file.extension.lower()
 
-            # Handle image files
-            if extension in {
+            # Handle image files (expanded format support)
+            image_extensions = {
                 ".jpg",
                 ".jpeg",
                 ".png",
                 ".gif",
                 ".bmp",
                 ".tiff",
+                ".tif",
                 ".webp",
-                ".heic",
-                ".heif",
-            }:
+                ".ico",
+                ".pcx",
+                ".tga",
+                ".dds",
+            }
+
+            # HEIC/HEIF files (require special handling)
+            heic_extensions = {".heic", ".heif"}
+
+            if extension in image_extensions:
                 return self._create_image_thumbnail(parent, file)
+            if extension in heic_extensions:
+                return (
+                    self._create_heic_thumbnail(parent, file)
+                    if HEIF_SUPPORTED
+                    else self._create_file_type_placeholder(parent, file, "HEIC Image")
+                )
 
             # Handle video files
             if extension in {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".webm"}:
@@ -490,70 +538,128 @@ class DuplicateReviewWindow:
         return None
 
     def _create_image_thumbnail(self, parent: ttk.Frame, file: FileMetadata) -> tk.Label | None:
-        """Create thumbnail for image file."""
+        """Create thumbnail for standard image files."""
+        return self._create_thumbnail_from_pil(parent, file)
+
+    def _create_heic_thumbnail(self, parent: ttk.Frame, file: FileMetadata) -> tk.Label | None:
+        """Create thumbnail for HEIC/HEIF files."""
+        if not HEIF_SUPPORTED:
+            return None
+        return self._create_thumbnail_from_pil(parent, file)
+
+    def _create_thumbnail_from_pil(self, parent: ttk.Frame, file: FileMetadata) -> tk.Label | None:
+        """Create thumbnail using PIL with enhanced error handling."""
         try:
             with Image.open(file.file_path) as img:
-                # Convert RGBA to RGB if necessary
-                if img.mode in ("RGBA", "LA"):
+                # Store original dimensions for metadata
+                original_size = img.size
+
+                # Convert RGBA to RGB if necessary for better compatibility
+                if img.mode in ("RGBA", "LA", "P"):
+                    # Create white background for transparent images
                     background = Image.new("RGB", img.size, (255, 255, 255))
-                    if img.mode == "RGBA":
+                    if img.mode == "RGBA" or img.mode == "LA":
                         background.paste(img, mask=img.split()[-1])
-                    else:
-                        background.paste(img, mask=img.split()[-1])
+                    else:  # P mode
+                        img = img.convert("RGBA")
+                        background.paste(
+                            img, mask=img.split()[-1] if len(img.split()) == 4 else None
+                        )
                     img = background
-                elif img.mode != "RGB":
+                elif img.mode not in ("RGB", "L"):
                     img = img.convert("RGB")
 
-                # Calculate thumbnail size maintaining aspect ratio
-                img.thumbnail((120, 120), Image.Resampling.LANCZOS)
+                # Calculate thumbnail size maintaining aspect ratio (larger preview)
+                img.thumbnail((150, 150), Image.Resampling.LANCZOS)
 
                 # Convert to PhotoImage
                 photo = ImageTk.PhotoImage(img)
 
-                # Create label
-                label = tk.Label(parent, image=photo, relief="solid", borderwidth=1)
-                label.image = photo  # Keep a reference to prevent garbage collection
+                # Create label with better styling
+                label = tk.Label(parent, image=photo, relief="solid", borderwidth=2, bg="white")
+                label.image = photo  # Keep reference
+                # Store original dimensions for metadata display
+                label.original_size = original_size
                 return label
 
         except Exception as e:
-            logger.warning(f"Could not create image thumbnail for {file.filename}: {e}")
+            logger.warning(f"Could not create thumbnail for {file.filename}: {e}")
             return None
 
     def _create_video_thumbnail(self, parent: ttk.Frame, file: FileMetadata) -> tk.Label | None:
-        """Create thumbnail placeholder for video file."""
-        try:
-            # Create a simple video icon placeholder
-            # In a production app, you'd use a video processing library to extract first frame
-            placeholder = Image.new("RGB", (120, 90), (64, 64, 64))
+        """Create enhanced thumbnail placeholder for video file."""
+        return self._create_file_type_placeholder(parent, file, "VIDEO")
 
-            # Add video play icon (simple triangle)
+    def _create_file_type_placeholder(
+        self, parent: ttk.Frame, file: FileMetadata, file_type: str = None
+    ) -> tk.Label | None:
+        """Create a placeholder with file type information."""
+        try:
+            # Determine file type if not provided
+            if not file_type:
+                extension = file.extension.lower()
+                if extension in {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".webm"}:
+                    file_type = "VIDEO"
+                elif extension in {".mp3", ".wav", ".flac", ".aac", ".ogg"}:
+                    file_type = "AUDIO"
+                else:
+                    file_type = extension.upper().lstrip(".") or "FILE"
+
+            # Create enhanced placeholder with better design
+            placeholder = Image.new("RGB", (150, 120), (240, 240, 240))
+
             try:
-                from PIL import ImageDraw
+                from PIL import ImageDraw, ImageFont
 
                 draw = ImageDraw.Draw(placeholder)
 
-                # Draw play triangle
-                triangle_points = [(45, 30), (45, 60), (75, 45)]
-                draw.polygon(triangle_points, fill=(255, 255, 255))
+                # Draw file type icon based on type
+                if file_type == "VIDEO":
+                    # Video play icon
+                    triangle_points = [(60, 40), (60, 80), (90, 60)]
+                    draw.polygon(triangle_points, fill=(100, 100, 100))
+                elif file_type.startswith("HEIC"):
+                    # Camera icon (simple rectangle with circle)
+                    draw.rectangle([50, 45, 100, 75], outline=(100, 100, 100), width=2)
+                    draw.ellipse([65, 55, 85, 75], outline=(100, 100, 100), width=2)
+                else:
+                    # Generic file icon
+                    draw.rectangle([60, 35, 90, 85], outline=(100, 100, 100), width=2)
+                    draw.polygon([(90, 35), (90, 50), (105, 50)], fill=(100, 100, 100))
 
-                # Add text
+                # Add file type text with better positioning
                 try:
-                    draw.text((35, 70), "VIDEO", fill=(255, 255, 255))
-                except OSError:
-                    # Font loading failed, skip text
-                    pass
+                    # Try to use a better font
+                    font = ImageFont.load_default()
+                    text_bbox = draw.textbbox((0, 0), file_type, font=font)
+                    text_width = text_bbox[2] - text_bbox[0]
+                    text_x = (150 - text_width) // 2
+                    draw.text((text_x, 90), file_type, fill=(100, 100, 100), font=font)
+                except (OSError, AttributeError):
+                    # Fallback for text rendering
+                    draw.text((55, 90), file_type[:8], fill=(100, 100, 100))
+
+                # Add file size info
+                size_text = f"{file.size_mb:.1f}MB"
+                try:
+                    size_bbox = draw.textbbox((0, 0), size_text, font=font)
+                    size_width = size_bbox[2] - size_bbox[0]
+                    size_x = (150 - size_width) // 2
+                    draw.text((size_x, 105), size_text, fill=(120, 120, 120), font=font)
+                except (OSError, AttributeError, UnboundLocalError):
+                    draw.text((60, 105), size_text[:8], fill=(120, 120, 120))
 
             except ImportError:
-                # ImageDraw not available, use simple gray rectangle
+                # Fallback if PIL ImageDraw is not available
                 pass
 
             photo = ImageTk.PhotoImage(placeholder)
-            label = tk.Label(parent, image=photo, relief="solid", borderwidth=1)
-            label.image = photo  # Keep a reference
+            label = tk.Label(parent, image=photo, relief="solid", borderwidth=2, bg="white")
+            label.image = photo
             return label
 
         except Exception as e:
-            logger.warning(f"Could not create video thumbnail for {file.filename}: {e}")
+            logger.warning(f"Could not create placeholder for {file.filename}: {e}")
             return None
 
     def _delete_selected_files(self) -> None:
@@ -569,6 +675,33 @@ class DuplicateReviewWindow:
             f"The following {len(self.files_to_delete)} files would be deleted:\n\n{file_list}\n\n"
             "Note: Actual deletion is not implemented for safety reasons.",
         )
+
+    def _get_image_dimensions(self, file: FileMetadata) -> str | None:
+        """Get image dimensions as formatted string."""
+        try:
+            with Image.open(file.file_path) as img:
+                width, height = img.size
+                return f"{width} × {height}"
+        except Exception:
+            return None
+
+    def _open_file_location(self, file: FileMetadata) -> None:
+        """Open the file location in system file manager."""
+        try:
+            import subprocess
+            import sys
+
+            if sys.platform == "darwin":  # macOS
+                subprocess.run(["open", "-R", str(file.file_path)], check=False)
+            elif sys.platform == "win32":  # Windows
+                subprocess.run(["explorer", "/select,", str(file.file_path)], check=False)
+            else:  # Linux and other Unix-like
+                subprocess.run(["xdg-open", str(file.file_path.parent)], check=False)
+        except Exception as e:
+            logger.warning(f"Could not open file location for {file.filename}: {e}")
+            messagebox.showwarning(
+                "Cannot Open Location", f"Could not open file location:\n{file.file_path.parent}"
+            )
 
     def show(self) -> None:
         """Show the review window."""
