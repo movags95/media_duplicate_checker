@@ -197,6 +197,15 @@ class DuplicateReviewWindow:
             row=0, column=2, padx=(0, 20)
         )
 
+        # Delete selected files button
+        self.delete_button = ttk.Button(
+            button_frame,
+            text="🗑️ Delete Selected Files",
+            command=self._delete_selected_files,
+            state="disabled",
+        )
+        self.delete_button.grid(row=0, column=3, padx=(0, 20))
+
         # Close button
         ttk.Button(footer_frame, text="Close", command=self._close).grid(
             row=0, column=1, sticky="e"
@@ -425,31 +434,31 @@ class DuplicateReviewWindow:
             self._load_current_group()
 
     def _update_selection_summary(self) -> None:
-        """Update the selection summary label."""
+        """Update the selection summary label and delete button state."""
         count = len(self.files_to_delete)
         if count == 0:
             self.selection_label.config(text="No files selected for deletion")
+            self.delete_button.config(state="disabled")
         elif count == 1:
             self.selection_label.config(text="1 file selected for deletion")
+            self.delete_button.config(state="normal")
         else:
             self.selection_label.config(text=f"{count} files selected for deletion")
+            self.delete_button.config(state="normal")
 
     def _close(self) -> None:
         """Close the review window."""
         if self.files_to_delete:
-            result = messagebox.askyesnocancel(
+            result = messagebox.askyesno(
                 "Files Selected",
                 f"You have {len(self.files_to_delete)} files marked for deletion.\n\n"
-                "Do you want to delete them now?\n"
-                "• Yes: Delete the selected files\n"
-                "• No: Close without deleting\n"
-                "• Cancel: Return to review",
+                "Are you sure you want to close without deleting them?\n"
+                "Use the 'Delete Selected Files' button to delete them first.",
+                icon="warning",
+                default="no",
             )
-
-            if result is None:  # Cancel
+            if not result:  # No - don't close
                 return
-            if result:  # Yes - delete files
-                self._delete_selected_files()
 
         self.window.destroy()
 
@@ -663,18 +672,138 @@ class DuplicateReviewWindow:
             return None
 
     def _delete_selected_files(self) -> None:
-        """Delete the selected files (placeholder implementation)."""
-        # For safety, we'll just show what would be deleted
-        # In a real implementation, this would actually delete files
+        """Delete the selected files with safety checks."""
         if not self.files_to_delete:
             return
 
-        file_list = "\n".join(str(path) for path in self.files_to_delete)
-        messagebox.showinfo(
-            "Files Would Be Deleted",
-            f"The following {len(self.files_to_delete)} files would be deleted:\n\n{file_list}\n\n"
-            "Note: Actual deletion is not implemented for safety reasons.",
+        # Safety check: Ensure all files still exist
+        existing_files = []
+        missing_files = []
+        for file_path in self.files_to_delete:
+            if file_path.exists():
+                existing_files.append(file_path)
+            else:
+                missing_files.append(file_path)
+
+        if not existing_files:
+            messagebox.showinfo("No Files to Delete", "No selected files exist anymore.")
+            # Clear missing files from selection
+            self.files_to_delete.clear()
+            self._update_selection_summary()
+            return
+
+        # Show final confirmation with file details
+        file_details = []
+        total_size_mb = 0
+        for file_path in existing_files:
+            try:
+                size_bytes = file_path.stat().st_size
+                size_mb = size_bytes / (1024 * 1024)
+                total_size_mb += size_mb
+                file_details.append(f"• {file_path.name} ({size_mb:.1f} MB)")
+            except OSError:
+                file_details.append(f"• {file_path.name} (size unknown)")
+
+        file_list = "\n".join(file_details)
+        confirmation_msg = (
+            f"⚠️  DELETE {len(existing_files)} FILES? ⚠️\n\n"
+            f"This action cannot be undone!\n\n"
+            f"Files to delete ({total_size_mb:.1f} MB total):\n\n{file_list}\n\n"
+            f"Are you absolutely sure you want to permanently delete these files?"
         )
+
+        # Show warning with missing files if any
+        if missing_files:
+            confirmation_msg += (
+                f"\n\nNote: {len(missing_files)} files are already missing and will be skipped."
+            )
+
+        result = messagebox.askyesno(
+            "⚠️ CONFIRM FILE DELETION ⚠️", confirmation_msg, icon="warning", default="no"
+        )
+
+        if not result:
+            return
+
+        # Perform deletion with error handling
+        deleted_files = []
+        failed_deletions = []
+
+        try:
+            import os
+            import sys
+
+            for file_path in existing_files:
+                try:
+                    if sys.platform == "darwin":  # macOS - move to trash if possible
+                        try:
+                            import subprocess
+
+                            subprocess.run(
+                                [
+                                    "osascript",
+                                    "-e",
+                                    f'tell app "Finder" to delete POSIX file "{file_path}"',
+                                ],
+                                check=True,
+                                capture_output=True,
+                            )
+                            deleted_files.append(file_path)
+                            logger.info(f"Moved to trash: {file_path}")
+                        except (subprocess.CalledProcessError, FileNotFoundError):
+                            # Fallback to permanent deletion
+                            os.remove(file_path)
+                            deleted_files.append(file_path)
+                            logger.info(f"Permanently deleted: {file_path}")
+                    else:
+                        # For non-macOS systems, delete permanently
+                        os.remove(file_path)
+                        deleted_files.append(file_path)
+                        logger.info(f"Deleted: {file_path}")
+
+                except OSError as e:
+                    failed_deletions.append((file_path, str(e)))
+                    logger.error(f"Failed to delete {file_path}: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error during deletion: {e}")
+            messagebox.showerror("Deletion Error", f"An unexpected error occurred: {e}")
+            return
+
+        # Update the files_to_delete set to remove successfully deleted files
+        for deleted_file in deleted_files:
+            self.files_to_delete.discard(deleted_file)
+
+        # Show results
+        if deleted_files and not failed_deletions:
+            messagebox.showinfo(
+                "Deletion Complete",
+                f"Successfully deleted {len(deleted_files)} file(s).\n\n"
+                f"Space recovered: {total_size_mb:.1f} MB",
+            )
+        elif deleted_files and failed_deletions:
+            failure_details = "\n".join(
+                [f"• {path.name}: {error}" for path, error in failed_deletions]
+            )
+            messagebox.showwarning(
+                "Partial Deletion",
+                f"Successfully deleted: {len(deleted_files)} file(s)\n"
+                f"Failed to delete: {len(failed_deletions)} file(s)\n\n"
+                f"Failures:\n{failure_details}",
+            )
+        elif failed_deletions:
+            failure_details = "\n".join(
+                [f"• {path.name}: {error}" for path, error in failed_deletions]
+            )
+            messagebox.showerror(
+                "Deletion Failed",
+                f"Failed to delete {len(failed_deletions)} file(s):\n\n{failure_details}",
+            )
+
+        # Refresh the view to update the display
+        self._update_selection_summary()
+        if self.scan_result.duplicate_groups:
+            self._load_current_group()
 
     def _get_image_dimensions(self, file: FileMetadata) -> str | None:
         """Get image dimensions as formatted string."""
