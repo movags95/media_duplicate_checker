@@ -38,6 +38,8 @@ class DuplicateReviewWindow:
         # State tracking
         self.files_to_delete: set[Path] = set()
         self.current_group_index = 0
+        self.filter_unresolved_only = False
+        self.auto_marked_groups: set[int] = set()  # Track which groups were auto-marked
 
         # Create window
         self.window = tk.Toplevel(parent)
@@ -61,19 +63,23 @@ class DuplicateReviewWindow:
         self.window.bind("<Left>", lambda e: self._prev_group())
         self.window.bind("<Right>", lambda e: self._next_group())
         self.window.bind("<Prior>", lambda e: self._prev_group())  # Page Up
-        self.window.bind("<Next>", lambda e: self._next_group())   # Page Down
+        self.window.bind("<Next>", lambda e: self._next_group())  # Page Down
 
         # File selection shortcuts (1-9 to toggle files)
         for i in range(1, 10):
-            self.window.bind(f"<Key-{i}>", lambda e, idx=i-1: self._toggle_file_by_index(idx))
+            self.window.bind(f"<Key-{i}>", lambda e, idx=i - 1: self._toggle_file_by_index(idx))
 
         # Quick action shortcuts
         self.window.bind("<s>", lambda e: self._mark_smaller_files())  # S for smaller
         self.window.bind("<S>", lambda e: self._mark_smaller_files())
-        self.window.bind("<o>", lambda e: self._mark_older_files())    # O for older
+        self.window.bind("<o>", lambda e: self._mark_older_files())  # O for older
         self.window.bind("<O>", lambda e: self._mark_older_files())
-        self.window.bind("<c>", lambda e: self._clear_selections())    # C for clear
+        self.window.bind("<c>", lambda e: self._clear_selections())  # C for clear
         self.window.bind("<C>", lambda e: self._clear_selections())
+        self.window.bind("<a>", lambda e: self._smart_auto_mark_all_groups())  # A for auto-mark
+        self.window.bind("<A>", lambda e: self._smart_auto_mark_all_groups())
+        self.window.bind("<f>", lambda e: self._toggle_filter_unresolved())  # F for filter
+        self.window.bind("<F>", lambda e: self._toggle_filter_unresolved())
         self.window.bind("<Delete>", lambda e: self._delete_selected_files())
         self.window.bind("<BackSpace>", lambda e: self._delete_selected_files())
 
@@ -109,7 +115,7 @@ class DuplicateReviewWindow:
             text="◀◀ Previous Group [←]",
             command=self._prev_group,
             style="Large.TButton",
-            width=20
+            width=20,
         )
         self.prev_button.grid(row=0, column=0, padx=(0, 10))
 
@@ -118,7 +124,7 @@ class DuplicateReviewWindow:
             text="Next Group [→] ▶▶",
             command=self._next_group,
             style="Large.TButton",
-            width=20
+            width=20,
         )
         self.next_button.grid(row=0, column=1)
 
@@ -131,8 +137,10 @@ class DuplicateReviewWindow:
         self.group_info_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
         # Keyboard shortcuts help
-        shortcuts_text = "Shortcuts: ← → (Navigate) | 1-9 (Toggle files) | S (Smaller) | O (Older) | C (Clear) | Del (Delete)"
-        shortcuts_label = ttk.Label(header_frame, text=shortcuts_text, font=("Arial", 8), foreground="gray")
+        shortcuts_text = "Shortcuts: ← → (Navigate) | 1-9 (Toggle files) | S (Smaller) | O (Older) | C (Clear) | A (Auto-mark all) | F (Filter) | Del (Delete)"
+        shortcuts_label = ttk.Label(
+            header_frame, text=shortcuts_text, font=("Arial", 8), foreground="gray"
+        )
         shortcuts_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
     def _create_main_content(self) -> None:
@@ -241,7 +249,7 @@ class DuplicateReviewWindow:
             text="Mark Smaller Files [S]",
             command=self._mark_smaller_files,
             style="Action.TButton",
-            width=18
+            width=18,
         ).grid(row=0, column=0, padx=(0, 10))
 
         ttk.Button(
@@ -249,7 +257,7 @@ class DuplicateReviewWindow:
             text="Mark Older Files [O]",
             command=self._mark_older_files,
             style="Action.TButton",
-            width=18
+            width=18,
         ).grid(row=0, column=1, padx=(0, 10))
 
         ttk.Button(
@@ -257,8 +265,27 @@ class DuplicateReviewWindow:
             text="Clear Selections [C]",
             command=self._clear_selections,
             style="Action.TButton",
-            width=18
-        ).grid(row=0, column=2, padx=(0, 20))
+            width=18,
+        ).grid(row=0, column=2, padx=(0, 10))
+
+        # Smart auto-mark button
+        ttk.Button(
+            button_frame,
+            text="🤖 Smart Auto-Mark All [A]",
+            command=self._smart_auto_mark_all_groups,
+            style="Action.TButton",
+            width=22,
+        ).grid(row=0, column=3, padx=(0, 10))
+
+        # Filter toggle button
+        self.filter_button = ttk.Button(
+            button_frame,
+            text="🔍 Show All Groups [F]",
+            command=self._toggle_filter_unresolved,
+            style="Action.TButton",
+            width=18,
+        )
+        self.filter_button.grid(row=0, column=4, padx=(0, 20))
 
         # Delete selected files button
         self.delete_button = ttk.Button(
@@ -267,9 +294,9 @@ class DuplicateReviewWindow:
             command=self._delete_selected_files,
             state="disabled",
             style="Action.TButton",
-            width=20
+            width=20,
         )
-        self.delete_button.grid(row=0, column=3, padx=(0, 20))
+        self.delete_button.grid(row=0, column=5, padx=(0, 20))
 
         # Close button
         ttk.Button(footer_frame, text="Close", command=self._close).grid(
@@ -296,13 +323,22 @@ class DuplicateReviewWindow:
 
         group = self.scan_result.duplicate_groups[self.current_group_index]
 
-        # Update header
+        # Update header with filtering status
+        filter_status = " (Filtered: Unresolved Only)" if self.filter_unresolved_only else ""
+        auto_mark_status = " 🤖" if self.current_group_index in self.auto_marked_groups else ""
+
         self.summary_label.config(
-            text=f"Group {self.current_group_index + 1} of {len(self.scan_result.duplicate_groups)}"
+            text=f"Group {self.current_group_index + 1} of {len(self.scan_result.duplicate_groups)}{filter_status}{auto_mark_status}"
+        )
+
+        resolved_status = (
+            "✅ RESOLVED"
+            if self._is_group_resolved(self.current_group_index)
+            else "⏳ NEEDS REVIEW"
         )
         self.group_info_label.config(
             text=f"Base name: '{group.base_name}' | {group.file_count} files | "
-            f"{group.total_size_mb:.1f} MB | Confidence: {group.confidence_score:.0%}"
+            f"{group.total_size_mb:.1f} MB | Confidence: {group.confidence_score:.0%} | Status: {resolved_status}"
         )
 
         # Update navigation buttons
@@ -508,6 +544,215 @@ class DuplicateReviewWindow:
 
         self._refresh_current_group()
 
+    def _smart_auto_mark_all_groups(self) -> None:
+        """Smart auto-mark files across all groups based on intelligent criteria."""
+        if not self.scan_result.duplicate_groups:
+            messagebox.showinfo("No Groups", "No duplicate groups found to process.")
+            return
+
+        # Show progress dialog
+        progress_window = self._create_progress_dialog()
+        progress_bar = progress_window[0]
+        progress_label = progress_window[1]
+        progress_toplevel = progress_window[2]
+
+        try:
+            total_groups = len(self.scan_result.duplicate_groups)
+            groups_processed = 0
+            files_auto_marked = 0
+            groups_auto_resolved = 0
+
+            for group_idx, group in enumerate(self.scan_result.duplicate_groups):
+                # Update progress
+                progress = (group_idx / total_groups) * 100
+                progress_bar["value"] = progress
+                progress_label.config(text=f"Processing group {group_idx + 1} of {total_groups}...")
+                progress_toplevel.update()
+
+                # Apply smart marking logic
+                result = self._apply_smart_marking_to_group(group, group_idx)
+                if result:
+                    files_auto_marked += result["files_marked"]
+                    if result["group_resolved"]:
+                        groups_auto_resolved += 1
+                        self.auto_marked_groups.add(group_idx)
+
+                groups_processed += 1
+
+            # Close progress dialog
+            progress_toplevel.destroy()
+
+            # Show results summary
+            self._show_auto_mark_summary(groups_processed, files_auto_marked, groups_auto_resolved)
+
+            # Refresh the current view
+            self._refresh_current_group()
+            self._update_selection_summary()
+
+        except Exception as e:
+            progress_toplevel.destroy()
+            logger.error(f"Error during auto-marking: {e}")
+            messagebox.showerror("Auto-Mark Error", f"An error occurred during auto-marking: {e}")
+
+    def _apply_smart_marking_to_group(self, group: DuplicateGroup, group_idx: int) -> dict | None:
+        """Apply smart marking logic to a single group."""
+        if not group.files or len(group.files) < 2:
+            return None
+
+        files_marked = 0
+        group_resolved = False
+
+        # Smart logic: Only auto-mark groups with exactly 2 files
+        if len(group.files) == 2:
+            file1, file2 = group.files[0], group.files[1]
+            file_to_mark = None
+
+            # Primary criteria: Mark the smaller file
+            if file1.size_bytes < file2.size_bytes:
+                file_to_mark = file1
+            elif file2.size_bytes < file1.size_bytes:
+                file_to_mark = file2
+            else:
+                # Tie-breaker: Same size, mark file with numeric suffix
+                file_to_mark = self._choose_file_with_numeric_suffix(file1, file2)
+
+            if file_to_mark and file_to_mark.file_path not in self.files_to_delete:
+                self.files_to_delete.add(file_to_mark.file_path)
+                files_marked = 1
+                group_resolved = True
+
+        return {"files_marked": files_marked, "group_resolved": group_resolved}
+
+    def _choose_file_with_numeric_suffix(
+        self, file1: FileMetadata, file2: FileMetadata
+    ) -> FileMetadata | None:
+        """Choose which file to mark when sizes are equal, preferring files with numeric suffixes."""
+        # Check if either file has a numeric suffix from the parsed filename
+        file1_has_suffix = (
+            file1.parsed_filename
+            and file1.parsed_filename.suffix
+            and file1.parsed_filename.suffix.isdigit()
+        )
+        file2_has_suffix = (
+            file2.parsed_filename
+            and file2.parsed_filename.suffix
+            and file2.parsed_filename.suffix.isdigit()
+        )
+
+        # If only one has a numeric suffix, mark that one
+        if file1_has_suffix and not file2_has_suffix:
+            return file1
+        if file2_has_suffix and not file1_has_suffix:
+            return file2
+        if file1_has_suffix and file2_has_suffix:
+            # Both have suffixes, mark the one with larger numeric suffix
+            try:
+                suffix1 = int(file1.parsed_filename.suffix)
+                suffix2 = int(file2.parsed_filename.suffix)
+                return file1 if suffix1 > suffix2 else file2
+            except (ValueError, AttributeError):
+                pass
+
+        # Fallback: no clear numeric suffix pattern, mark the first file
+        return file1
+
+    def _create_progress_dialog(self) -> tuple:
+        """Create a progress dialog for batch operations."""
+        progress_window = tk.Toplevel(self.window)
+        progress_window.title("Auto-Marking in Progress")
+        progress_window.geometry("400x120")
+        progress_window.resizable(False, False)
+        progress_window.transient(self.window)
+        progress_window.grab_set()
+
+        # Center the dialog
+        progress_window.update_idletasks()
+        x = (progress_window.winfo_screenwidth() // 2) - (400 // 2)
+        y = (progress_window.winfo_screenheight() // 2) - (120 // 2)
+        progress_window.geometry(f"400x120+{x}+{y}")
+
+        # Progress label
+        progress_label = ttk.Label(
+            progress_window, text="Starting auto-marking process...", font=("Arial", 10)
+        )
+        progress_label.pack(pady=(20, 10))
+
+        # Progress bar
+        progress_bar = ttk.Progressbar(progress_window, mode="determinate", length=350)
+        progress_bar.pack(pady=(0, 20))
+
+        progress_window.update()
+        return (progress_bar, progress_label, progress_window)
+
+    def _show_auto_mark_summary(
+        self, groups_processed: int, files_marked: int, groups_resolved: int
+    ) -> None:
+        """Show summary of auto-marking results."""
+        remaining_groups = len(self.scan_result.duplicate_groups) - groups_resolved
+
+        summary_msg = (
+            f"🤖 Smart Auto-Marking Complete!\n\n"
+            f"📊 Results:\n"
+            f"• Groups processed: {groups_processed}\n"
+            f"• Files auto-marked for deletion: {files_marked}\n"
+            f"• Groups fully resolved: {groups_resolved}\n"
+            f"• Groups remaining for review: {remaining_groups}\n\n"
+            f"💡 Use the filter button to show only unresolved groups,\n"
+            f"or continue reviewing all groups manually."
+        )
+
+        messagebox.showinfo("Auto-Marking Complete", summary_msg)
+
+    def _toggle_filter_unresolved(self) -> None:
+        """Toggle between showing all groups vs only unresolved groups."""
+        self.filter_unresolved_only = not self.filter_unresolved_only
+
+        if self.filter_unresolved_only:
+            self.filter_button.config(text="🔍 Show All Groups [F]")
+            # Navigate to first unresolved group
+            self._navigate_to_next_unresolved_group(start_from=0)
+        else:
+            self.filter_button.config(text="🔍 Filter Unresolved [F]")
+            # Go back to regular navigation
+            self._load_current_group()
+
+    def _navigate_to_next_unresolved_group(self, start_from: int = None) -> None:
+        """Navigate to the next group that needs manual resolution."""
+        if start_from is None:
+            start_from = self.current_group_index
+
+        total_groups = len(self.scan_result.duplicate_groups)
+
+        # Find next unresolved group
+        for i in range(total_groups):
+            check_index = (start_from + i) % total_groups
+            if not self._is_group_resolved(check_index):
+                self.current_group_index = check_index
+                self._load_current_group()
+                return
+
+        # All groups are resolved
+        messagebox.showinfo(
+            "All Resolved", "All groups have been resolved! No manual review needed."
+        )
+        self.filter_unresolved_only = False
+        self.filter_button.config(text="🔍 Filter Unresolved [F]")
+
+    def _is_group_resolved(self, group_index: int) -> bool:
+        """Check if a group is considered resolved (has at least one file marked for deletion)."""
+        if group_index >= len(self.scan_result.duplicate_groups):
+            return True
+
+        group = self.scan_result.duplicate_groups[group_index]
+        if len(group.files) <= 1:
+            return True  # Single files are considered resolved
+
+        # Check if any file in this group is marked for deletion
+        for file in group.files:
+            if file.file_path in self.files_to_delete:
+                return True
+        return False
+
     def _refresh_current_group(self) -> None:
         """Refresh the display of the current group."""
         self._load_current_group()
@@ -529,15 +774,36 @@ class DuplicateReviewWindow:
 
     def _prev_group(self) -> None:
         """Navigate to the previous duplicate group."""
-        if self.current_group_index > 0:
+        if self.filter_unresolved_only:
+            self._navigate_to_prev_unresolved_group()
+        elif self.current_group_index > 0:
             self.current_group_index -= 1
             self._load_current_group()
 
     def _next_group(self) -> None:
         """Navigate to the next duplicate group."""
-        if self.current_group_index < len(self.scan_result.duplicate_groups) - 1:
+        if self.filter_unresolved_only:
+            self._navigate_to_next_unresolved_group(self.current_group_index + 1)
+        elif self.current_group_index < len(self.scan_result.duplicate_groups) - 1:
             self.current_group_index += 1
             self._load_current_group()
+
+    def _navigate_to_prev_unresolved_group(self) -> None:
+        """Navigate to the previous unresolved group."""
+        total_groups = len(self.scan_result.duplicate_groups)
+
+        # Search backwards for unresolved group
+        for i in range(1, total_groups + 1):
+            check_index = (self.current_group_index - i) % total_groups
+            if not self._is_group_resolved(check_index):
+                self.current_group_index = check_index
+                self._load_current_group()
+                return
+
+        # No unresolved groups found
+        messagebox.showinfo(
+            "All Resolved", "All groups have been resolved! No manual review needed."
+        )
 
     def _update_selection_summary(self) -> None:
         """Update the selection summary label and delete button state."""
