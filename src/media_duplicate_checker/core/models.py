@@ -161,19 +161,51 @@ class ApplicationConfig(BaseModel):
     )
     enable_logging: bool = Field(default=True, description="Enable application logging")
     log_level: str = Field(default="INFO", description="Logging level")
-    
+
     # Auto-selection settings
     image_similarity_threshold: float = Field(
-        default=0.90, ge=0.0, le=1.0, description="Similarity threshold for auto-selecting image duplicates"
+        default=0.90,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for auto-selecting image duplicates",
     )
     video_similarity_threshold: float = Field(
-        default=0.85, ge=0.0, le=1.0, description="Similarity threshold for auto-selecting video duplicates"
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for auto-selecting video duplicates",
     )
     auto_selection_confidence_threshold: float = Field(
         default=0.80, ge=0.0, le=1.0, description="Minimum confidence required for auto-selection"
     )
     enable_auto_selection: bool = Field(
         default=True, description="Enable automatic selection of duplicate files"
+    )
+
+    # Visual filtering during scanning
+    enable_visual_filtering: bool = Field(
+        default=True, description="Enable visual similarity filtering during duplicate scanning"
+    )
+    visual_filtering_image_threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="Visual similarity threshold for image filtering during scan",
+    )
+    visual_filtering_video_threshold: float = Field(
+        default=0.80,
+        ge=0.0,
+        le=1.0,
+        description="Visual similarity threshold for video filtering during scan",
+    )
+    visual_filtering_max_group_size: int = Field(
+        default=10,
+        ge=2,
+        le=50,
+        description="Maximum group size to apply visual filtering (performance limit)",
+    )
+    visual_filtering_cache_size: int = Field(
+        default=1000, ge=0, description="Maximum number of similarity results to cache"
     )
 
     @field_validator("supported_extensions")

@@ -24,7 +24,7 @@ class MainWindow:
         # Application components
         self.config = ApplicationConfig()
         self.scanner = MediaFileScanner(self.config)
-        self.grouper = DuplicateGrouper()
+        self.grouper = DuplicateGrouper(self.config)
 
         # State
         self.current_scan_result: ScanResult | None = None
@@ -192,7 +192,31 @@ class MainWindow:
             # Group duplicates
             self._update_status("Analyzing for duplicates...")
             self.progress_label.config(text="Analyzing files for duplicates...")
-            duplicate_groups = self.grouper.create_duplicate_groups(media_files)
+
+            # Define progress callback for visual filtering stage
+            def visual_filtering_progress_callback(
+                current: int, total: int | None = None, message: str = ""
+            ) -> None:
+                if total:
+                    percent = (current / total) * 100
+                    status_msg = f"Visual analysis: {current}/{total} groups ({percent:.0f}%)"
+                else:
+                    status_msg = f"Visual analysis: {current} groups"
+
+                if message:
+                    self.progress_label.config(text=message)
+                    self._update_status(status_msg)
+                else:
+                    self.progress_label.config(text=status_msg)
+
+                self.root.update_idletasks()
+
+            duplicate_groups = self.grouper.create_duplicate_groups(
+                media_files,
+                progress_callback=visual_filtering_progress_callback
+                if self.config.enable_visual_filtering
+                else None,
+            )
 
             # Create scan result
             import time
@@ -275,6 +299,22 @@ class MainWindow:
         ttk.Label(self.results_frame, text=f"{result.potential_space_savings_mb:.1f} MB").grid(
             row=3, column=1, sticky="w"
         )
+
+        # Show visual filtering statistics if enabled
+        if self.config.enable_visual_filtering and hasattr(self.grouper, "visual_filtering_stats"):
+            stats = self.grouper.visual_filtering_stats
+            if stats["groups_analyzed"] > 0:
+                ttk.Label(self.results_frame, text="Visual filtering:").grid(
+                    row=4, column=0, sticky="w"
+                )
+                visual_stats_text = (
+                    f"Analyzed {stats['groups_analyzed']} groups, "
+                    f"filtered out {stats['groups_filtered_out']}, "
+                    f"{stats['visual_comparisons']} comparisons"
+                )
+                ttk.Label(self.results_frame, text=visual_stats_text, wraplength=400).grid(
+                    row=4, column=1, sticky="w"
+                )
 
         # Show info message
         if len(result.duplicate_groups) > 0:
