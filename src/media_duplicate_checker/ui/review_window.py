@@ -605,6 +605,11 @@ class DuplicateReviewWindow:
         # Smart logic: Only auto-mark groups with exactly 2 files
         if len(group.files) == 2:
             file1, file2 = group.files[0], group.files[1]
+
+            # Safety check: Validate that files are likely genuine duplicates
+            if not self._are_files_likely_duplicates(file1, file2):
+                return {"files_marked": 0, "group_resolved": False}
+
             file_to_mark = None
 
             # Primary criteria: Mark the smaller file
@@ -622,6 +627,60 @@ class DuplicateReviewWindow:
                 group_resolved = True
 
         return {"files_marked": files_marked, "group_resolved": group_resolved}
+
+    def _are_files_likely_duplicates(self, file1: FileMetadata, file2: FileMetadata) -> bool:
+        """
+        Validate that two files are likely genuine duplicates using safety criteria.
+
+        Checks:
+        1. Created dates are close (within 1 minute) OR one file's created date matches the other's modified date
+        2. File extensions match
+        3. Base names are the same (already grouped, but double-check)
+
+        Args:
+            file1: First file metadata
+            file2: Second file metadata
+
+        Returns:
+            True if files are likely genuine duplicates, False otherwise
+        """
+        # Check 1: Date proximity - created dates should be close OR cross-date matching
+        created1, created2 = file1.created_at, file2.created_at
+        modified1, modified2 = file1.modified_at, file2.modified_at
+
+        # Allow 1 minute tolerance for created dates
+        time_diff_seconds = abs((created1 - created2).total_seconds())
+        dates_are_close = time_diff_seconds <= 60
+
+        # Check for cross-date matching (one file's created = other's modified)
+        cross_match_1 = abs((created1 - modified2).total_seconds()) <= 60
+        cross_match_2 = abs((created2 - modified1).total_seconds()) <= 60
+
+        date_criteria_met = dates_are_close or cross_match_1 or cross_match_2
+
+        # Check 2: File extensions should match
+        ext1 = file1.extension.lower()
+        ext2 = file2.extension.lower()
+        extensions_match = ext1 == ext2
+
+        # Check 3: Base names should be the same (from parsed filename)
+        base_names_match = True  # Already grouped by base name, but verify
+        if file1.parsed_filename and file2.parsed_filename:
+            base_names_match = file1.parsed_filename.base_name == file2.parsed_filename.base_name
+
+        # Log the validation for debugging
+        if not date_criteria_met:
+            logger.debug(
+                f"Date criteria failed for {file1.filename} and {file2.filename}: "
+                f"created diff={time_diff_seconds}s, cross-match1={cross_match_1}, cross-match2={cross_match_2}"
+            )
+
+        if not extensions_match:
+            logger.debug(
+                f"Extension mismatch: {file1.filename} ({ext1}) vs {file2.filename} ({ext2})"
+            )
+
+        return date_criteria_met and extensions_match and base_names_match
 
     def _choose_file_with_numeric_suffix(
         self, file1: FileMetadata, file2: FileMetadata
@@ -697,6 +756,7 @@ class DuplicateReviewWindow:
             f"• Files auto-marked for deletion: {files_marked}\n"
             f"• Groups fully resolved: {groups_resolved}\n"
             f"• Groups remaining for review: {remaining_groups}\n\n"
+            f"🛡️ Safety: Only marked files with matching dates & extensions\n"
             f"💡 Use the filter button to show only unresolved groups,\n"
             f"or continue reviewing all groups manually."
         )
