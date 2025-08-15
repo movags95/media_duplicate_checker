@@ -34,9 +34,21 @@ cd media_duplicate_checker
 ```
 
 2. **Install UV (if not already installed):**
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+
+   **On macOS/Linux:**
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+   **On Windows (PowerShell):**
+   ```powershell
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+
+   **Alternative (any platform):**
+   ```bash
+   pip install uv
+   ```
 
 3. **Install dependencies:**
 ```bash
@@ -52,6 +64,16 @@ Launch the graphical interface:
 uv run media-duplicate-checker
 ```
 
+**Note:** The GUI requires tkinter, which is included with most Python installations. If you encounter tkinter import errors on Linux, you may need to install it separately:
+```bash
+# Ubuntu/Debian
+sudo apt-get install python3-tk
+
+# CentOS/RHEL/Fedora
+sudo dnf install tkinter
+```
+
+**Using the GUI:**
 1. Click "Browse..." to select a directory
 2. Click "Scan for Duplicates" to find potential duplicates
 3. Click "Review Last Scan" to examine and manage duplicates
@@ -75,6 +97,15 @@ uv run media-duplicate-checker --scan /path/to/photos --output-format json
 
 # Enable debug logging
 uv run media-duplicate-checker --scan /path/to/photos --log-level DEBUG
+```
+
+**Windows users:** Use forward slashes or escape backslashes in paths:
+```powershell
+# Good
+uv run media-duplicate-checker --scan "C:/Users/Username/Pictures"
+
+# Also good
+uv run media-duplicate-checker --scan "C:\\Users\\Username\\Pictures"
 ```
 
 ### Available Commands
