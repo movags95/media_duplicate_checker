@@ -16,7 +16,8 @@ try:
 except ImportError:
     HEIF_SUPPORTED = False
 
-from ..core import DuplicateGroup, FileMetadata, ScanResult
+from ..core import ApplicationConfig, DuplicateGroup, FileMetadata, ScanResult
+from ..core.auto_selector import AutoSelector, AutoSelectionResult, GroupFilter
 
 logger = logging.getLogger(__name__)
 
@@ -24,20 +25,32 @@ logger = logging.getLogger(__name__)
 class DuplicateReviewWindow:
     """Window for reviewing and managing duplicate file groups."""
 
-    def __init__(self, parent: tk.Tk, scan_result: ScanResult):
+    def __init__(self, parent: tk.Tk, scan_result: ScanResult, config: ApplicationConfig | None = None):
         """
         Initialize the duplicate review window.
 
         Args:
             parent: Parent tkinter window
             scan_result: Results from the duplicate scan
+            config: Application configuration (optional)
         """
         self.parent = parent
         self.scan_result = scan_result
+        self.config = config or ApplicationConfig()
 
         # State tracking
         self.files_to_delete: set[Path] = set()
         self.current_group_index = 0
+        
+        # Auto-selection components
+        self.auto_selector = AutoSelector(
+            image_similarity_threshold=self.config.image_similarity_threshold,
+            video_similarity_threshold=self.config.video_similarity_threshold,
+            min_confidence_threshold=self.config.auto_selection_confidence_threshold
+        )
+        self.auto_results: list[AutoSelectionResult] = []
+        self.filter_status = "all"  # "all", "resolved", "unresolved"
+        self.filtered_groups: list[DuplicateGroup] = []
 
         # Create window
         self.window = tk.Toplevel(parent)
@@ -228,9 +241,36 @@ class DuplicateReviewWindow:
         footer_frame = ttk.Frame(self.window, padding="10")
         footer_frame.grid(row=2, column=0, sticky="ew")
 
+        # Filter controls
+        filter_frame = ttk.LabelFrame(footer_frame, text="Filter Groups", padding="5")
+        filter_frame.grid(row=0, column=0, sticky="w", padx=(0, 20))
+        
+        self.filter_var = tk.StringVar(value="all")
+        ttk.Radiobutton(filter_frame, text="All", variable=self.filter_var, value="all", command=self._apply_filter).grid(row=0, column=0)
+        ttk.Radiobutton(filter_frame, text="Unresolved", variable=self.filter_var, value="unresolved", command=self._apply_filter).grid(row=0, column=1)
+        ttk.Radiobutton(filter_frame, text="Auto-resolved", variable=self.filter_var, value="resolved", command=self._apply_filter).grid(row=0, column=2)
+
+        # Auto-selection controls
+        auto_frame = ttk.LabelFrame(footer_frame, text="Auto Selection", padding="5")
+        auto_frame.grid(row=0, column=1, sticky="w", padx=(0, 20))
+        
+        ttk.Button(
+            auto_frame,
+            text="⚡ Auto-Select Current",
+            command=self._auto_select_current,
+            width=18
+        ).grid(row=0, column=0, padx=(0, 5))
+        
+        ttk.Button(
+            auto_frame,
+            text="⚡ Auto-Select All",
+            command=self._auto_select_all,
+            width=18
+        ).grid(row=0, column=1)
+
         # Action buttons with keyboard shortcuts indicated
         button_frame = ttk.Frame(footer_frame)
-        button_frame.grid(row=0, column=0)
+        button_frame.grid(row=1, column=0, columnspan=2, pady=(10, 0))
 
         # Configure button style
         style = ttk.Style()
@@ -273,17 +313,20 @@ class DuplicateReviewWindow:
 
         # Close button
         ttk.Button(footer_frame, text="Close", command=self._close).grid(
-            row=0, column=1, sticky="e"
+            row=0, column=2, sticky="e"
         )
-        footer_frame.grid_columnconfigure(0, weight=1)
+        footer_frame.grid_columnconfigure(1, weight=1)
 
         # Selection summary
         self.selection_label = ttk.Label(footer_frame, text="No files selected for deletion")
-        self.selection_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        self.selection_label.grid(row=2, column=0, columnspan=3, sticky="w", pady=(5, 0))
 
     def _load_first_group(self) -> None:
         """Load the first duplicate group."""
-        if self.scan_result.duplicate_groups:
+        # Initialize filtered groups
+        self._update_filtered_groups()
+        
+        if self.filtered_groups:
             self.current_group_index = 0
             self._load_current_group()
         else:
@@ -291,14 +334,18 @@ class DuplicateReviewWindow:
 
     def _load_current_group(self) -> None:
         """Load and display the current duplicate group."""
-        if not self.scan_result.duplicate_groups:
+        if not self.filtered_groups:
             return
 
-        group = self.scan_result.duplicate_groups[self.current_group_index]
+        group = self.filtered_groups[self.current_group_index]
 
         # Update header
+        total_groups = len(self.scan_result.duplicate_groups)
+        filtered_groups = len(self.filtered_groups)
+        filter_text = f" ({self.filter_status})" if self.filter_status != "all" else ""
+        
         self.summary_label.config(
-            text=f"Group {self.current_group_index + 1} of {len(self.scan_result.duplicate_groups)}"
+            text=f"Group {self.current_group_index + 1} of {filtered_groups}{filter_text} (Total: {total_groups})"
         )
         self.group_info_label.config(
             text=f"Base name: '{group.base_name}' | {group.file_count} files | "
@@ -309,7 +356,7 @@ class DuplicateReviewWindow:
         self.prev_button.config(state="normal" if self.current_group_index > 0 else "disabled")
         self.next_button.config(
             state="normal"
-            if self.current_group_index < len(self.scan_result.duplicate_groups) - 1
+            if self.current_group_index < len(self.filtered_groups) - 1
             else "disabled"
         )
 
@@ -454,15 +501,15 @@ class DuplicateReviewWindow:
         self._update_selection_summary()
 
         # Refresh the current view
-        if self.scan_result.duplicate_groups:
-            self._load_file_details(self.scan_result.duplicate_groups[self.current_group_index])
+        if self.filtered_groups:
+            self._load_file_details(self.filtered_groups[self.current_group_index])
 
     def _mark_smaller_files(self) -> None:
         """Mark all smaller files in the current group for deletion."""
-        if not self.scan_result.duplicate_groups:
+        if not self.filtered_groups:
             return
 
-        group = self.scan_result.duplicate_groups[self.current_group_index]
+        group = self.filtered_groups[self.current_group_index]
         if not group.files:
             return
 
@@ -478,10 +525,10 @@ class DuplicateReviewWindow:
 
     def _mark_older_files(self) -> None:
         """Mark all older files in the current group for deletion."""
-        if not self.scan_result.duplicate_groups:
+        if not self.filtered_groups:
             return
 
-        group = self.scan_result.duplicate_groups[self.current_group_index]
+        group = self.filtered_groups[self.current_group_index]
         if not group.files:
             return
 
@@ -497,10 +544,10 @@ class DuplicateReviewWindow:
 
     def _clear_selections(self) -> None:
         """Clear all deletion selections for the current group."""
-        if not self.scan_result.duplicate_groups:
+        if not self.filtered_groups:
             return
 
-        group = self.scan_result.duplicate_groups[self.current_group_index]
+        group = self.filtered_groups[self.current_group_index]
 
         # Remove all files in this group from deletion set
         for file in group.files:
@@ -514,10 +561,10 @@ class DuplicateReviewWindow:
 
     def _toggle_file_by_index(self, index: int) -> None:
         """Toggle deletion status for file at given index using keyboard shortcut."""
-        if not self.scan_result.duplicate_groups:
+        if not self.filtered_groups:
             return
 
-        group = self.scan_result.duplicate_groups[self.current_group_index]
+        group = self.filtered_groups[self.current_group_index]
         if index < len(group.files):
             file = group.files[index]
             if file.file_path in self.files_to_delete:
@@ -535,7 +582,7 @@ class DuplicateReviewWindow:
 
     def _next_group(self) -> None:
         """Navigate to the next duplicate group."""
-        if self.current_group_index < len(self.scan_result.duplicate_groups) - 1:
+        if self.current_group_index < len(self.filtered_groups) - 1:
             self.current_group_index += 1
             self._load_current_group()
 
@@ -937,6 +984,143 @@ class DuplicateReviewWindow:
             messagebox.showwarning(
                 "Cannot Open Location", f"Could not open file location:\n{file.file_path.parent}"
             )
+
+    def _update_filtered_groups(self) -> None:
+        """Update the list of filtered groups based on current filter status."""
+        self.filtered_groups = GroupFilter.filter_by_resolution_status(
+            self.scan_result.duplicate_groups,
+            self.auto_results,
+            self.filter_status
+        )
+        
+        # Reset current group index if it's out of bounds
+        if self.current_group_index >= len(self.filtered_groups):
+            self.current_group_index = 0
+    
+    def _apply_filter(self) -> None:
+        """Apply the selected filter and refresh the view."""
+        self.filter_status = self.filter_var.get()
+        self._update_filtered_groups()
+        
+        if self.filtered_groups:
+            self.current_group_index = 0
+            self._load_current_group()
+        else:
+            self.summary_label.config(text=f"No {self.filter_status} groups found")
+    
+    def _auto_select_current(self) -> None:
+        """Auto-select files for deletion in the current group."""
+        if not self.filtered_groups:
+            return
+            
+        group = self.filtered_groups[self.current_group_index]
+        result = self.auto_selector.analyze_group(group)
+        
+        if result is None:
+            messagebox.showinfo(
+                "Auto-Selection", 
+                "Current group cannot be auto-selected:\n"
+                "- Group must have exactly 2 files\n"
+                "- Files must be visually similar\n"
+                "- Clear suffix pattern preferred"
+            )
+            return
+            
+        if not self.auto_selector.can_auto_select(result):
+            response = messagebox.askyesno(
+                "Low Confidence Auto-Selection",
+                f"Auto-selection confidence is low ({result.confidence:.1%}).\n\n"
+                f"Reasoning: {result.reasoning}\n\n"
+                "Apply selection anyway?",
+                icon="warning"
+            )
+            if not response:
+                return
+        
+        # Apply the auto-selection
+        self.files_to_delete.update(result.files_to_delete)
+        result.applied = True
+        
+        # Update auto_results
+        existing_result = next(
+            (r for r in self.auto_results if r.group.base_name == group.base_name), 
+            None
+        )
+        if existing_result:
+            existing_result.files_to_delete = result.files_to_delete
+            existing_result.applied = result.applied
+        else:
+            self.auto_results.append(result)
+        
+        messagebox.showinfo(
+            "Auto-Selection Applied",
+            f"Auto-selected files for deletion in group '{group.base_name}'\n\n"
+            f"Confidence: {result.confidence:.1%}\n"
+            f"Reasoning: {result.reasoning}"
+        )
+        
+        self._refresh_current_group()
+    
+    def _auto_select_all(self) -> None:
+        """Auto-select files for deletion in all applicable groups."""
+        if not self.scan_result.duplicate_groups:
+            return
+            
+        # Show progress dialog
+        progress_window = tk.Toplevel(self.window)
+        progress_window.title("Auto-Selecting...")
+        progress_window.geometry("400x150")
+        progress_window.transient(self.window)
+        progress_window.grab_set()
+        
+        progress_label = ttk.Label(progress_window, text="Analyzing groups for auto-selection...")
+        progress_label.pack(pady=20)
+        
+        progress_bar = ttk.Progressbar(progress_window, mode="indeterminate")
+        progress_bar.pack(pady=10, padx=20, fill="x")
+        progress_bar.start()
+        
+        progress_window.update()
+        
+        try:
+            # Process all groups
+            results = self.auto_selector.process_groups(
+                self.scan_result.duplicate_groups,
+                apply_selections=True
+            )
+            
+            # Apply auto-selections to files_to_delete
+            for result in results['auto_selected']:
+                self.files_to_delete.update(result.files_to_delete)
+            
+            # Store results
+            self.auto_results = results['auto_selected'] + results['low_confidence']
+            
+            # Generate summary
+            summary = self.auto_selector.get_auto_selection_summary(results)
+            
+            progress_window.destroy()
+            
+            # Show results
+            messagebox.showinfo(
+                "Auto-Selection Complete",
+                f"Auto-selection analysis complete!\n\n{summary}\n\n"
+                "Use the filter controls to view resolved/unresolved groups."
+            )
+            
+            # Update the filter to show unresolved groups by default
+            self.filter_var.set("unresolved")
+            self._apply_filter()
+            
+        except Exception as e:
+            progress_window.destroy()
+            logger.error(f"Error during auto-selection: {e}")
+            messagebox.showerror(
+                "Auto-Selection Error",
+                f"An error occurred during auto-selection:\n{e}"
+            )
+        
+        self._refresh_current_group()
 
     def show(self) -> None:
         """Show the review window."""

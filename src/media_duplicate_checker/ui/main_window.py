@@ -293,7 +293,7 @@ class MainWindow:
             return
 
         try:
-            review_window = DuplicateReviewWindow(self.root, self.current_scan_result)
+            review_window = DuplicateReviewWindow(self.root, self.current_scan_result, self.config)
             review_window.show()
         except Exception as e:
             logger.error(f"Error opening review window: {e}")

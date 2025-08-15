@@ -161,6 +161,20 @@ class ApplicationConfig(BaseModel):
     )
     enable_logging: bool = Field(default=True, description="Enable application logging")
     log_level: str = Field(default="INFO", description="Logging level")
+    
+    # Auto-selection settings
+    image_similarity_threshold: float = Field(
+        default=0.90, ge=0.0, le=1.0, description="Similarity threshold for auto-selecting image duplicates"
+    )
+    video_similarity_threshold: float = Field(
+        default=0.85, ge=0.0, le=1.0, description="Similarity threshold for auto-selecting video duplicates"
+    )
+    auto_selection_confidence_threshold: float = Field(
+        default=0.80, ge=0.0, le=1.0, description="Minimum confidence required for auto-selection"
+    )
+    enable_auto_selection: bool = Field(
+        default=True, description="Enable automatic selection of duplicate files"
+    )
 
     @field_validator("supported_extensions")
     @classmethod
