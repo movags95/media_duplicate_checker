@@ -49,8 +49,36 @@ class DuplicateReviewWindow:
         self.window.transient(parent)
         self.window.grab_set()
 
+        # Set up keyboard shortcuts
+        self._setup_keyboard_shortcuts()
+
         self._setup_gui()
         self._load_first_group()
+
+    def _setup_keyboard_shortcuts(self) -> None:
+        """Set up keyboard shortcuts for faster navigation."""
+        # Navigation shortcuts
+        self.window.bind("<Left>", lambda e: self._prev_group())
+        self.window.bind("<Right>", lambda e: self._next_group())
+        self.window.bind("<Prior>", lambda e: self._prev_group())  # Page Up
+        self.window.bind("<Next>", lambda e: self._next_group())   # Page Down
+
+        # File selection shortcuts (1-9 to toggle files)
+        for i in range(1, 10):
+            self.window.bind(f"<Key-{i}>", lambda e, idx=i-1: self._toggle_file_by_index(idx))
+
+        # Quick action shortcuts
+        self.window.bind("<s>", lambda e: self._mark_smaller_files())  # S for smaller
+        self.window.bind("<S>", lambda e: self._mark_smaller_files())
+        self.window.bind("<o>", lambda e: self._mark_older_files())    # O for older
+        self.window.bind("<O>", lambda e: self._mark_older_files())
+        self.window.bind("<c>", lambda e: self._clear_selections())    # C for clear
+        self.window.bind("<C>", lambda e: self._clear_selections())
+        self.window.bind("<Delete>", lambda e: self._delete_selected_files())
+        self.window.bind("<BackSpace>", lambda e: self._delete_selected_files())
+
+        # Allow focusing window to capture key events
+        self.window.focus_set()
 
     def _setup_gui(self) -> None:
         """Set up the GUI components."""
@@ -68,14 +96,30 @@ class DuplicateReviewWindow:
         header_frame.grid(row=0, column=0, sticky="ew")
         header_frame.grid_columnconfigure(1, weight=1)
 
-        # Navigation controls
+        # Navigation controls with larger, more accessible buttons
         nav_frame = ttk.Frame(header_frame)
         nav_frame.grid(row=0, column=0, sticky="w")
 
-        self.prev_button = ttk.Button(nav_frame, text="◀ Previous", command=self._prev_group)
-        self.prev_button.grid(row=0, column=0, padx=(0, 5))
+        # Style the navigation buttons for better visibility
+        style = ttk.Style()
+        style.configure("Large.TButton", font=("Arial", 12, "bold"))
 
-        self.next_button = ttk.Button(nav_frame, text="Next ▶", command=self._next_group)
+        self.prev_button = ttk.Button(
+            nav_frame,
+            text="◀◀ Previous Group [←]",
+            command=self._prev_group,
+            style="Large.TButton",
+            width=20
+        )
+        self.prev_button.grid(row=0, column=0, padx=(0, 10))
+
+        self.next_button = ttk.Button(
+            nav_frame,
+            text="Next Group [→] ▶▶",
+            command=self._next_group,
+            style="Large.TButton",
+            width=20
+        )
         self.next_button.grid(row=0, column=1)
 
         # Summary info
@@ -85,6 +129,11 @@ class DuplicateReviewWindow:
         # Current group info
         self.group_info_label = ttk.Label(header_frame, text="", font=("Arial", 10))
         self.group_info_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
+
+        # Keyboard shortcuts help
+        shortcuts_text = "Shortcuts: ← → (Navigate) | 1-9 (Toggle files) | S (Smaller) | O (Older) | C (Clear) | Del (Delete)"
+        shortcuts_label = ttk.Label(header_frame, text=shortcuts_text, font=("Arial", 8), foreground="gray")
+        shortcuts_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
     def _create_main_content(self) -> None:
         """Create the main content area with file comparison."""
@@ -179,30 +228,46 @@ class DuplicateReviewWindow:
         footer_frame = ttk.Frame(self.window, padding="10")
         footer_frame.grid(row=2, column=0, sticky="ew")
 
-        # Action buttons
+        # Action buttons with keyboard shortcuts indicated
         button_frame = ttk.Frame(footer_frame)
         button_frame.grid(row=0, column=0)
 
+        # Configure button style
+        style = ttk.Style()
+        style.configure("Action.TButton", font=("Arial", 10, "bold"))
+
         ttk.Button(
             button_frame,
-            text="Mark All Smaller Files for Deletion",
+            text="Mark Smaller Files [S]",
             command=self._mark_smaller_files,
+            style="Action.TButton",
+            width=18
         ).grid(row=0, column=0, padx=(0, 10))
 
         ttk.Button(
-            button_frame, text="Mark All Older Files for Deletion", command=self._mark_older_files
+            button_frame,
+            text="Mark Older Files [O]",
+            command=self._mark_older_files,
+            style="Action.TButton",
+            width=18
         ).grid(row=0, column=1, padx=(0, 10))
 
-        ttk.Button(button_frame, text="Clear All Selections", command=self._clear_selections).grid(
-            row=0, column=2, padx=(0, 20)
-        )
+        ttk.Button(
+            button_frame,
+            text="Clear Selections [C]",
+            command=self._clear_selections,
+            style="Action.TButton",
+            width=18
+        ).grid(row=0, column=2, padx=(0, 20))
 
         # Delete selected files button
         self.delete_button = ttk.Button(
             button_frame,
-            text="🗑️ Delete Selected Files",
+            text="🗑️ Delete Selected [Del]",
             command=self._delete_selected_files,
             state="disabled",
+            style="Action.TButton",
+            width=20
         )
         self.delete_button.grid(row=0, column=3, padx=(0, 20))
 
@@ -269,9 +334,9 @@ class DuplicateReviewWindow:
 
     def _create_file_card(self, file: FileMetadata, index: int) -> None:
         """Create an enhanced file comparison card with preview."""
-        # Card frame with better styling
+        # Card frame with better styling and keyboard shortcut indicator
         is_marked = file.file_path in self.files_to_delete
-        card_title = f"File {index + 1} {'🗑️' if is_marked else ''}"
+        card_title = f"[{index + 1}] File {index + 1} {'🗑️' if is_marked else ''}"
 
         card_frame = ttk.LabelFrame(self.scrollable_frame, text=card_title, padding="12")
         card_frame.grid(row=index // 2, column=index % 2, sticky="nsew", padx=8, pady=8)
@@ -306,24 +371,50 @@ class DuplicateReviewWindow:
             )
             value_label.grid(row=row, column=info_column + 1, sticky="nw", padx=(10, 0), pady=2)
 
-        # Enhanced action checkbox with visual feedback
+        # Enhanced action checkbox with visual feedback and larger click target
         delete_var = tk.BooleanVar(value=file.file_path in self.files_to_delete)
         checkbox_text = "🗑️ Mark for deletion" if not is_marked else "✅ Marked for deletion"
+
+        # Create a frame for the larger click target
+        checkbox_frame = ttk.Frame(card_frame)
+        checkbox_frame.grid(row=6, column=info_column, columnspan=2, sticky="ew", pady=(15, 0))
+        checkbox_frame.grid_columnconfigure(0, weight=1)
+
         delete_checkbox = ttk.Checkbutton(
-            card_frame,
+            checkbox_frame,
             text=checkbox_text,
             variable=delete_var,
             command=lambda f=file, v=delete_var: self._toggle_file_deletion(f, v),
         )
-        delete_checkbox.grid(row=6, column=info_column, columnspan=2, sticky="w", pady=(15, 0))
+        delete_checkbox.grid(row=0, column=0, sticky="w")
 
-        # Add "Open File Location" button
+        # Make the entire card clickable for toggling
+        def toggle_on_click(event):
+            delete_var.set(not delete_var.get())
+            self._toggle_file_deletion(file, delete_var)
+
+        # Bind click events to card frame and its children (excluding buttons)
+        card_frame.bind("<Button-1>", toggle_on_click)
+
+        # Create buttons frame for better layout
+        buttons_frame = ttk.Frame(card_frame)
+        buttons_frame.grid(row=7, column=info_column, columnspan=2, sticky="ew", pady=(5, 0))
+
+        # Add "Open File Location" button with improved styling
         open_button = ttk.Button(
-            card_frame,
+            buttons_frame,
             text="📁 Open Location",
             command=lambda: self._open_file_location(file),
         )
-        open_button.grid(row=7, column=info_column, columnspan=2, sticky="w", pady=(5, 0))
+        open_button.grid(row=0, column=0, sticky="w", padx=(0, 5))
+
+        # Add quick toggle button
+        toggle_button = ttk.Button(
+            buttons_frame,
+            text="⚡ Toggle Delete",
+            command=lambda: toggle_on_click(None),
+        )
+        toggle_button.grid(row=0, column=1, sticky="w")
 
     def _load_file_details(self, group: DuplicateGroup) -> None:
         """Load files into the details tree view."""
@@ -420,6 +511,21 @@ class DuplicateReviewWindow:
     def _refresh_current_group(self) -> None:
         """Refresh the display of the current group."""
         self._load_current_group()
+
+    def _toggle_file_by_index(self, index: int) -> None:
+        """Toggle deletion status for file at given index using keyboard shortcut."""
+        if not self.scan_result.duplicate_groups:
+            return
+
+        group = self.scan_result.duplicate_groups[self.current_group_index]
+        if index < len(group.files):
+            file = group.files[index]
+            if file.file_path in self.files_to_delete:
+                self.files_to_delete.discard(file.file_path)
+            else:
+                self.files_to_delete.add(file.file_path)
+
+            self._refresh_current_group()
 
     def _prev_group(self) -> None:
         """Navigate to the previous duplicate group."""
